@@ -1,0 +1,125 @@
+1) Get the authoritative text
+
+Use the official, consolidated online version as your source of truth. It’s updated when amendments happen and lets you fetch section-by-section text (easier than scraping random PDFs).
+
+Official consolidation (English/Bangla): Government “BD Laws” portal: Constitution (Act 367). 
+Bangladesh Laws
+
+For offline mirrors (good for cross-checking, but don’t rely on them for latest edits):
+
+UNHCR Refworld copies (with amendment cutoffs noted). 
+Refworld
++1
+
+University/NGO mirrors (older snapshots). 
+ECNL
+Human Rights Library
+
+Tip: Treat bdlaws.minlaw.gov.bd as the live truth and store its last-checked timestamp in your database so you know when you last synced. 
+Bangladesh Laws
+
+2) Choose the approach (RAG beats fine-tuning here)
+
+Because you want the model to stick to the Constitution only (and amendments change over time), a Retrieval-Augmented Generation (RAG) pipeline is safer and cheaper than fine-tuning:
+
+Retriever: indexes the Constitution text (split by Article/Clause).
+
+Generator (LLM): answers only using retrieved chunks and must include citations (Article, Clause, Schedule).
+
+Guardrails: if the answer isn’t in the text, the model should say so and suggest the closest relevant Article.
+
+You can run this with any base LLM (OpenAI, Cohere, local Llama, etc.). The key is your retrieval layer + strict prompting.
+
+3) Build your Constitution knowledge base
+
+A. Extract & normalize text
+
+Pull the table of contents and each Article’s text from the BD Laws page. Keep both English and Bangla if you will support bilingual Q&A. 
+Bangladesh Laws
+
+B. Chunking strategy
+
+Split at Article level first, then into ~800–1200 token chunks with overlap (100–150 tokens).
+
+Preserve a header per chunk: {part, article, clause_range, language, url, last_checked_at}.
+
+Keep Schedules as separate documents (e.g., “Schedule 1 – Republic, Oath templates”, etc.).
+
+C. Embeddings & index
+
+Create two indexes if you need bilingual search: one for EN, one for BN (Bangla requires a multilingual embedding model).
+
+Store in FAISS/Chroma/Weaviate/PGvector—anything you like.
+
+D. Citations
+
+Save the canonical URL for each chunk from BD Laws (so the bot can link/cite), plus article_number and clause_numbers. 
+Bangladesh Laws
+
+4) The system prompt & policies (copy/paste)
+
+Use a strict system message for the LLM:
+
+“You are a legal assistant limited to the Constitution of the People’s Republic of Bangladesh. Answer only from the Constitution text provided in the retrieved context.
+
+Include Article and Clause citations (and Schedule if applicable).
+
+If something isn’t in the Constitution, say: ‘This is not covered by the Constitution text I have.’
+
+Use the user’s language (Bangla or English).
+
+Never add external facts, case law, or commentary.”
+
+5) Sample retrieval flow (pseudo)
+# 1) Embed the query (auto-detect BN/EN)
+# 2) Retrieve top-5 chunks (semantic + BM25 hybrid if possible)
+# 3) Rerank (optional)
+# 4) Compose context = titles + chunk texts + metadata (Article, Clause, URL)
+# 5) Call LLM with strict system prompt
+# 6) Post-process: ensure at least one citation like “(Art. 39(2)(a))”
+
+6) Data model (suggested)
+{
+  "id": "part2_art39_en_1",
+  "part": "Part III",
+  "article": 39,
+  "clauses": ["(1)", "(2)(a)", "(2)(b)"],
+  "language": "en",
+  "text": "39. Freedom of thought and conscience, and of speech...",
+  "source_url": "https://bdlaws.minlaw.gov.bd/act-367/section-....html",
+  "last_checked_at": "2025-08-15T00:00:00Z"
+}
+
+7) Handling amendments & freshness
+
+On startup (or nightly), fetch the Constitution table of sections from BD Laws and compare hashes/last-modified to detect changes; re-index any changed Articles. 
+Bangladesh Laws
+
+Keep a constitution_version_note like: “Synced from BD Laws on 2025-08-15; reflects amendments available on the site as of that date.” (Refworld copies often state their last amendment year—useful for cross-checking but not authoritative). 
+Refworld
++1
+
+8) Bilingual support (Bangla/English)
+
+Maintain parallel documents for EN and BN. If the user asks in Bangla, search BN index first, fall back to EN if low similarity.
+
+Ensure your tokenizer and UI fully support Bangla Unicode.
+
+9) UI/UX guardrails you should add
+
+Source panel: always show Article numbers and a link to the BD Laws section the answer came from. 
+Bangladesh Laws
+
+“Not in Constitution” message: if retrieval confidence < threshold, show the closest matching Article snippets instead of guessing.
+
+Mode toggle: “Q&A”, “Browse by Part/Article”, “Search within Article text”.
+
+10) Minimal starter stack (example)
+
+Indexer: Python + BeautifulSoup (for BD Laws HTML), or just copy official text manually into JSON if scraping is hard.
+
+Vector DB: Chroma/FAISS.
+
+Embeddings: multilingual (e.g., sentence-transformers “paraphrase-multilingual-MiniLM-L12-v2”) for Bangla coverage.
+
+LLM: any modern model; enforce the system prompt above.

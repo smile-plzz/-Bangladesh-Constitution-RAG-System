@@ -11,9 +11,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Generated data files
-/bdlaws.jsonl
-/bdlaws.parquet
+
 
 # Local environment
 /venv/

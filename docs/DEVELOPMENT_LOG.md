@@ -1,4 +1,8 @@
 
+<!-- Gemini Directive: This file should be kept up-to-date with the project's progress. -->
+
+> **Note:** For the current development plan and task list, see `docs/TASK_LIST.md`.
+
 # Development Log
 
 This log tracks the development process of the Bangladesh Constitution Q&A System.

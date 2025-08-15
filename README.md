@@ -1,3 +1,5 @@
+<!-- Gemini Directive: This file should be kept up-to-date with the project's progress. -->
+
 # Constitution of Bangladesh - Q&A System
 
 This project aims to build a question-answering system for the Constitution of Bangladesh using a Retrieval-Augmented Generation (RAG) approach.
@@ -65,3 +67,7 @@ For a more detailed explanation of the project, see the following documents:
 
 - **`docs/PROJECT_DETAILS.md`**: A detailed overview of the project architecture, data pipeline, and RAG pipeline.
 - **`docs/DEVELOPMENT_LOG.md`**: A log of the development process.
+
+## Project Management
+
+For the current development plan and task list, see `docs/TASK_LIST.md`.

@@ -1,4 +1,8 @@
 
+<!-- Gemini Directive: This file should be kept up-to-date with the project's progress. -->
+
+> **Note:** For the current development plan and task list, see `docs/TASK_LIST.md`.
+
 # Project Details
 
 This document provides a detailed overview of the Bangladesh Constitution Q&A System.

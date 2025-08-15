@@ -1,3 +1,4 @@
+<!-- Gemini Directive: This file should be kept up-to-date with the project's progress. -->
 
 # Future Development
 

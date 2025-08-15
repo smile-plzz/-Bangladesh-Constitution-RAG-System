@@ -1,3 +1,4 @@
+
 # Node.js
 node_modules/
 npm-debug.log*
@@ -9,3 +10,13 @@ Thumbs.db
 # IDE-specific files
 .vscode/
 .idea/
+
+# Generated data files
+/bdlaws.jsonl
+/bdlaws.parquet
+
+# Local environment
+/venv/
+
+# Vector database
+/chroma_db/

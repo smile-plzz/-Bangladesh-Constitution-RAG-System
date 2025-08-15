@@ -1,6 +1,23 @@
+
 [
   {
-    "text": "More information...",
-    "link": "https://www.iana.org/domains/example"
+    "id": "part1_art1_en",
+    "part": "Part I",
+    "article": 1,
+    "clauses": ["(1)"],
+    "language": "en",
+    "text": "The Republic",
+    "source_url": "https://bd-laws.pages.dev/act-367.html",
+    "last_checked_at": "2025-08-15T00:00:00Z"
+  },
+  {
+    "id": "part1_art2_en",
+    "part": "Part I",
+    "article": 2,
+    "clauses": ["(1)"],
+    "language": "en",
+    "text": "The territory of the Republic",
+    "source_url": "https://bd-laws.pages.dev/act-367.html",
+    "last_checked_at": "2025-08-15T00:00:00Z"
   }
 ]

@@ -23,62 +23,38 @@ The system is composed of two main parts:
 
 ## 2. Data Pipeline
 
-The data pipeline is responsible for acquiring and processing the constitution text. You can use either the Python crawler or the API fetchers.
+You can use either the Python crawler or the API fetchers.
 
-### Python Crawler: `crawl_bdlaws.py`
-
-- **Purpose:** Crawl `https://bd-laws.pages.dev/` and extract the full text.
-- **Technology:** Python, Playwright, BeautifulSoup, pandas.
-- **Process:**
-    1. Recursively crawl and extract main content.
-    2. Clean and chunk text (≈800 tokens with overlap).
-    3. Emit `bdlaws.jsonl` and `bdlaws.parquet`.
-- **Schema (`bdlaws.parquet`):**
-    - `doc_url` (string): The source URL of the document.
-    - `doc_title` (string): The title of the document.
-    - `headings` (string): The headings from the document, joined by " | ".
-    - `chunk_id` (string): A unique ID for each text chunk.
-    - `chunk_index` (integer): The index of the chunk within the document.
-    - `text` (string): The text chunk.
-
-### API Fetchers: `src/fetch-constitution.js`, `src/fetch-sections.js`
-
-- **Purpose:** Pull sections for the Constitution (or any act) directly from the API and emit JSONL compatible with the RAG pipeline.
-- **Schema (JSONL records):**
-    - `url` (string): API URL for the section with an anchor.
-    - `title` (string): Human-readable title, e.g., `Act <id> - <section name>`.
-    - `headings` (array of strings): Section name.
-    - `text` (string): Section description/content.
-- **Ingestion:** JSONL is chunked on-the-fly inside `src/rag.js` to the same effective chunking as Parquet.
+- JSONL record fields now include `created_at`, `updated_at`, `act_id`, `section_id` for recency-aware answers.
 
 ## 3. RAG Pipeline
 
-The RAG pipeline is the core of the Q&A system. It uses the data from `bdlaws.parquet` or JSONL files to answer questions.
-
 ### Key Components
 
-- **`src/rag.js`:** The main file containing the RAG logic.
-    - **Embedding Model:** `Xenova/bge-small-en-v1.5` via `@xenova/transformers`.
-    - **Vector Database:** Chroma over HTTP (requires running a local server) with the collection name `constitution`.
-    - **LLM:** Local text generation model (`Xenova/distilgpt2`) to produce the final answer.
-    - **Strictness:** The prompt instructs the model to answer only from provided context; if not covered, it must say so.
-- **`src/setup-db.js`:** CLI to read Parquet or JSONL, embed, and populate Chroma.
-- **`src/query.js`:** CLI to retrieve, build the prompt, and generate an answer.
-- **`src/fetch-constitution.js` / `src/fetch-sections.js`:** Data acquisition via API.
+- **`src/rag.js`:**
+  - **Embedding Model:** `Xenova/bge-m3` (multilingual) via `@xenova/transformers`.
+  - **Vector Database:** Chroma over HTTP (collection: `constitution_m3`).
+  - **Indexing:** Batched embeddings (64 docs/batch) and `upsert` to reduce memory and allow incremental rebuilds.
+  - **Query:** Returns up to 8 nearest chunks.
+  - **Answer composition:** Structured, concise output with Summary, Key provisions and Sources. Supports Bangla labels via `--lang=bn`. Filters noisy `[***]`/`[OMITTED]` lines.
+- **`src/setup-db.js`:** Reads Parquet/JSONL, builds embeddings and upserts to Chroma (batched).
+- **`src/query.js`:** CLI to retrieve and print a structured answer. Accepts `--lang=bn`.
+- **Scripts:**
+  - `scripts/start-chroma.ps1`: Windows helper to start Chroma (Docker or Python CLI).
+  - `scripts/healthcheck.ps1`: Check server heartbeat.
 
 ### How it Works
 
-1. Start a Chroma HTTP server (Docker or Python CLI) on `http://localhost:8000`.
-2. Acquire data (crawler or API) → produce `bdlaws.parquet` or JSONL.
-3. `setup-db.js` reads records, chunks (if JSONL), embeds with `@xenova/transformers`, and upserts into Chroma.
-4. `query.js` embeds the user query, retrieves nearest chunks, constructs a strict prompt with inline sources, and generates an answer.
+1. Start a Chroma HTTP server (`npm run start:chroma`) on `http://localhost:8000`.
+2. Acquire data (crawler or API) → JSONL with date metadata.
+3. `setup-db.js` chunks (if JSONL), batches embeddings, and upserts into Chroma.
+4. `query.js` embeds the query, retrieves nearest chunks, and prints a concise, date-sorted structured answer.
 
 ## 4. How to Use
 
-1. Acquire the data (crawler or API).
-2. `npm install`.
-3. Start Chroma server:
-   - Docker: `docker run -p 8000:8000 chromadb/chroma`
-   - Python: `chroma run --path ./chroma_db`
-4. Build DB: `node src/setup-db.js <your .parquet | .jsonl>`
-5. Query: `node src/query.js "Your question here"`
+1. `npm install`
+2. Start Chroma: `npm run start:chroma` (new terminal)
+3. Healthcheck: `npm run health` (expect `200`)
+4. Fetch data: `node src/fetch-constitution.js`
+5. Build DB: `npm run build:db` (or `node src/setup-db.js <your JSONL>`)
+6. Query: `npm run ask` or `npm run ask:bn`

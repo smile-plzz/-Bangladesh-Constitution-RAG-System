@@ -4,10 +4,10 @@ import fs from 'fs';
 import crypto from 'crypto';
 
 const DB_PATH = 'chroma_db';
-const COLLECTION_NAME = 'constitution';
+const COLLECTION_NAME = 'constitution_m3';
 
 // 1. Initialize the pipeline for creating embeddings
-const extractor = await pipeline('feature-extraction', 'Xenova/bge-small-en-v1.5');
+const extractor = await pipeline('feature-extraction', 'Xenova/bge-m3');
 
 // 2. Initialize ChromaDB client
 // Use HTTP server (start with: `chroma run --path ./chroma_db`)
@@ -61,6 +61,10 @@ async function setupDatabase(filePath) {
                 const headingsArray = Array.isArray(d.headings) ? d.headings : (typeof d.headings === 'string' ? [d.headings] : []);
                 const headingsJoined = headingsArray.join(' | ');
                 const text = d.text || d.raw_text || '';
+                const created_at = d.created_at || null;
+                const updated_at = d.updated_at || null;
+                const act_id = d.act_id || null;
+                const section_id = d.section_id || null;
                 if (!text) continue;
 
                 const words = text.split(/\s+/);
@@ -76,6 +80,10 @@ async function setupDatabase(filePath) {
                         chunk_id,
                         chunk_index: Math.floor(i / step),
                         text: chunk,
+                        created_at,
+                        updated_at,
+                        act_id,
+                        section_id,
                     });
                 }
             }
@@ -88,29 +96,36 @@ async function setupDatabase(filePath) {
             return;
         }
 
-        // Prepare documents and metadata
-        const documents = records.map(record => record.text);
-        const metadatas = records.map(record => ({
-            doc_url: record.doc_url,
-            doc_title: record.doc_title,
-            headings: record.headings,
-        }));
-        const ids = records.map(record => record.chunk_id);
+        // Batch embeddings and upserts
+        const BATCH_SIZE = 64;
+        for (let start = 0; start < records.length; start += BATCH_SIZE) {
+            const batch = records.slice(start, start + BATCH_SIZE);
+            const documents = batch.map(r => r.text);
+            const ids = batch.map(r => r.chunk_id);
+            const metadatas = batch.map(r => ({
+                doc_url: r.doc_url,
+                doc_title: r.doc_title,
+                headings: r.headings,
+                created_at: r.created_at || null,
+                updated_at: r.updated_at || null,
+                act_id: r.act_id || null,
+                section_id: r.section_id || null,
+            }));
 
-        // Generate embeddings
-        const embeddings = [];
-        for (const doc of documents) {
-            const result = await extractor(doc, { pooling: 'mean', normalize: true });
-            embeddings.push(Array.from(result.data));
+            const embeddings = [];
+            for (const doc of documents) {
+                const result = await extractor(doc, { pooling: 'mean', normalize: true });
+                embeddings.push(Array.from(result.data));
+            }
+
+            await collection.upsert({
+                ids,
+                embeddings,
+                metadatas,
+                documents,
+            });
+            console.log(`Indexed ${Math.min(start + BATCH_SIZE, records.length)} / ${records.length}`);
         }
-
-        // Add to the collection
-        await collection.add({
-            ids: ids,
-            embeddings: embeddings,
-            metadatas: metadatas,
-            documents: documents
-        });
 
         console.log('Database setup complete.');
 
@@ -121,7 +136,7 @@ async function setupDatabase(filePath) {
 
 
 // 4. Function to query the database
-async function queryDatabase(queryText, nResults = 5) {
+async function queryDatabase(queryText, nResults = 8) {
     try {
         const collection = await client.getCollection({ name: COLLECTION_NAME });
 
@@ -173,7 +188,7 @@ function answerFromContext(query, retrievedDocs, maxSentences = 5) {
     const docs = retrievedDocs.documents[0];
     const metas = retrievedDocs.metadatas[0];
 
-    const keywords = Array.from(new Set(String(query).toLowerCase().split(/[^a-zA-Z]+/).filter(w => w.length >= 4)));
+    const keywords = Array.from(new Set(String(query).toLowerCase().split(/[^\p{L}]+/u).filter(w => w.length >= 2)));
 
     const seen = new Set();
     const sentences = [];
@@ -183,7 +198,8 @@ function answerFromContext(query, retrievedDocs, maxSentences = 5) {
             .replace(/\s+/g, ' ')
             .split(/(?<=[\.\?!])\s+/)
             .map(s => s.trim())
-            .filter(Boolean);
+            .filter(Boolean)
+            .filter(s => !/^\[+.*\]+$/.test(s) && s !== '[***]' && !/\[OMITTED\]/i.test(s));
     };
 
     // Prefer sentences that include any keyword; keep order by retrieval rank then sentence order
@@ -227,7 +243,7 @@ function answerFromContext(query, retrievedDocs, maxSentences = 5) {
 
 // 5c. Structured answer composer (Summary, Key provisions, Sources)
 function composeStructuredAnswer(query, retrievedDocs, options = {}) {
-    const maxProvisions = options.maxProvisions ?? 5;
+    const maxProvisions = options.maxProvisions ?? 3;
     const language = options.language || 'en';
 
     const L = (key) => {
@@ -259,7 +275,8 @@ function composeStructuredAnswer(query, retrievedDocs, options = {}) {
         .replace(/\s+/g, ' ')
         .split(/(?<=[\.\?!])\s+/)
         .map(s => s.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .filter(s => !/^\[+.*\]+$/.test(s) && s !== '[***]' && !/\[OMITTED\]/i.test(s));
 
     const simplify = (s) => s
         .replace(/\(\d+\)/g, '') // remove clause markers like (1)
@@ -271,10 +288,10 @@ function composeStructuredAnswer(query, retrievedDocs, options = {}) {
         return m ? m[1] : null;
     };
 
-    // Query expansion for relevance scoring
+    // Query expansion for relevance scoring (supports non-Latin letters)
     const q = String(query).toLowerCase();
-    const qTerms = new Set(q.split(/[^a-z]+/).filter(Boolean));
-    const bonusTerms = new Set(['power', 'authority', 'executive', 'prime', 'minister', 'cabinet', 'dissolve', 'parliament']);
+    const qTerms = new Set(q.split(/[^\p{L}]+/u).filter(Boolean));
+    const bonusTerms = new Set(['power', 'authority', 'executive', 'prime', 'minister', 'cabinet', 'দায়িত্ব', 'ক্ষমতা', 'প্রধানমন্ত্রী', 'ক্যাবিনেট', 'পার্লামেন্ট', 'দিসলভ', 'ভোট']);
 
     const scoreSentence = (s) => {
         const t = s.toLowerCase();
@@ -302,13 +319,20 @@ function composeStructuredAnswer(query, retrievedDocs, options = {}) {
         const heading = (meta.headings || '').split(' | ')[0] || '';
         const summary = simplify(first);
         const score = scoreSentence(first);
-        provisions.push({ article, clause, heading, summary, meta, score });
+        // parse dates to timestamps for sorting later
+        const updatedTs = meta.updated_at ? Date.parse(meta.updated_at) : 0;
+        const createdTs = meta.created_at ? Date.parse(meta.created_at) : 0;
+        provisions.push({ article, clause, heading, summary, meta, score, updatedTs, createdTs });
     }
 
-    // Prioritize by score then by original order
-    provisions.sort((a, b) => b.score - a.score);
+    // Sort by date (updated_at desc, then created_at desc), then by relevance score
+    provisions.sort((a, b) => {
+        if (b.updatedTs !== a.updatedTs) return b.updatedTs - a.updatedTs;
+        if (b.createdTs !== a.createdTs) return b.createdTs - a.createdTs;
+        return b.score - a.score;
+    });
 
-    // Deduplicate by article+heading to keep best-scored per provision
+    // Deduplicate by article+heading to keep the most recent/relevant per provision
     const seen = new Set();
     const unique = [];
     for (const p of provisions) {
@@ -318,8 +342,8 @@ function composeStructuredAnswer(query, retrievedDocs, options = {}) {
         unique.push(p);
     }
 
-    // Summary: top 2 scored provisions as single sentences
-    const summaryLines = unique.slice(0, 2).map(p => p.summary);
+    // Summary: top 1 concise point
+    const summaryLines = unique.slice(0, 1).map(p => p.summary);
 
     const lines = [];
     if (summaryLines.length) {
@@ -344,7 +368,7 @@ function composeStructuredAnswer(query, retrievedDocs, options = {}) {
         if (sourcesSeen.has(srcKey)) continue;
         sourcesSeen.add(srcKey);
         sources.push(`- ${p.meta.doc_title} (${p.meta.doc_url})`);
-        if (sources.length >= 10) break;
+        if (sources.length >= 5) break;
     }
     if (sources.length) {
         lines.push('');

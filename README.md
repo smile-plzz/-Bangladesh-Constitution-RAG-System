@@ -10,11 +10,14 @@ This project aims to build a question-answering system for the Constitution of B
 - `bdlaws.jsonl`: The raw, line-delimited JSON output from the crawler.
 - `bdlaws.parquet`: The final, chunked, and processed data ready for the RAG pipeline.
 - `src/`: Contains the Node.js-based RAG pipeline.
-  - `rag.js`: The core RAG logic, including embedding generation and querying.
-  - `setup-db.js`: A script to set up the vector database.
-  - `query.js`: A script to query the RAG system.
+  - `rag.js`: The core RAG logic, including embedding generation (multilingual), querying and answer composition.
+  - `setup-db.js`: A script to set up the vector database (batched upserts).
+  - `query.js`: A script to query the RAG system (supports `--lang=bn`).
   - `fetch-sections.js`: Fetch sections for a given act (e.g., `/sections/383`) and write JSONL.
   - `fetch-constitution.js`: Discover the Constitution act via API and write all its sections as JSONL.
+- `scripts/`: Helper scripts
+  - `start-chroma.ps1`: Start a local Chroma server (Docker or Python CLI).
+  - `healthcheck.ps1`: Check the server heartbeat.
 - `data/`: Directory for storing data.
 
 ## Data Acquisition
@@ -41,57 +44,51 @@ node src/fetch-constitution.js
 ```
 node src/fetch-sections.js https://bd-laws-api.bdit.community/api/sections/383
 ```
-This produces a JSONL file like `bdlaws_constitution_<ACT_ID>.jsonl` or `bdlaws_sections_383.jsonl`.
+This produces a JSONL file like `bdlaws_constitution_<ACT_ID>.jsonl` or `bdlaws_sections_383.jsonl` including `created_at`/`updated_at`.
 
 ## RAG Pipeline
 
-Once the data has been acquired, use the Node.js-based RAG pipeline to ask questions. The vector store uses a Chroma HTTP server.
+- Embeddings: `Xenova/bge-m3` (multilingual) via `@xenova/transformers`.
+- Vector DB: Chroma HTTP server (collection: `constitution_m3`).
+- Indexing: Batched embeddings (64) and upserts for efficiency.
+- Answering: Concise structured output (Summary, Key provisions, Sources) with Bangla labels via `--lang=bn`.
 
-**1. Install Node.js Dependencies:**
+### Quickstart
 
+1) Install deps
 ```
 npm install
 ```
 
-**2. Start Chroma Server (required):**
-
-- Docker:
+2) Start Chroma server (new terminal)
 ```
-docker run -p 8000:8000 chromadb/chroma
-```
-- Or Python:
-```
-pip install chromadb
-chroma run --path ./chroma_db
-# or: python -m chromadb run --path ./chroma_db
+npm run start:chroma
+# healthcheck
+npm run health   # expect 200
 ```
 
-**3. Set up the Database:**
-
-- From Parquet:
+3) Fetch data
 ```
-node src/setup-db.js bdlaws.parquet
-```
-- From JSONL (API output or crawler output):
-```
-node src/setup-db.js bdlaws_constitution_<ACT_ID>.jsonl
-# or
-node src/setup-db.js bdlaws_sections_383.jsonl
+node src/fetch-constitution.js
 ```
 
-**4. Query the System:**
-
+4) Build the DB
 ```
-node src/query.js "Your question about the constitution"
+npm run build:db
+# or: node src/setup-db.js bdlaws_constitution_<ACT_ID>.jsonl
+```
+
+5) Ask questions
+```
+npm run ask
+npm run ask:bn
 ```
 
 ## Documentation
 
-For a more detailed explanation of the project, see the following documents:
-
-- **`docs/PROJECT_DETAILS.md`**: A detailed overview of the project architecture, data pipeline, and RAG pipeline.
-- **`docs/DEVELOPMENT_LOG.md`**: A log of the development process.
+- **`docs/PROJECT_DETAILS.md`**: Architecture, data pipeline, RAG details.
+- **`docs/DEVELOPMENT_LOG.md`**: Development history.
 
 ## Project Management
 
-For the current development plan and task list, see `docs/TASK_LIST.md`.
+- See `docs/TASK_LIST.md` for plan and tasks.

@@ -7,6 +7,20 @@
 
 This log tracks the development process of the Bangladesh Constitution Q&A System.
 
+## 2025-08-18
+
+- **API-based Data Acquisition:**
+  - Added `src/fetch-constitution.js` to discover the Constitution act and export its sections as JSONL.
+  - Added `src/fetch-sections.js` to export sections for a specific act as JSONL (e.g., `/sections/383`).
+- **JSONL Ingestion in RAG:**
+  - Enhanced `src/rag.js` to detect `.jsonl`/`.json`, chunk to the standard schema, and embed into Chroma.
+- **Chroma Client Migration:**
+  - Switched to Chroma HTTP server (host/port) and disabled the default embedding function requirement.
+  - Documented how to start the server via Docker or Python.
+- **DX Improvements:**
+  - Updated `README.md` and `docs/PROJECT_DETAILS.md` with API flow, commands, and strict RAG guidance.
+  - Added npm scripts for fetching and building.
+
 ## 2025-08-15
 
 - **Project Initialization & Initial Exploration:**

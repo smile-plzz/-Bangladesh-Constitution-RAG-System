@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "fetch:sections": "node src/fetch-sections.js",
+    "fetch:constitution": "node src/fetch-constitution.js",
+    "build:db:constitution": "node src/fetch-constitution.js && for /f %g in ('dir /b bdlaws_constitution_*.jsonl') do node src/setup-db.js %g"
   },
   "keywords": [],
   "author": "",

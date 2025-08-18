@@ -1,11 +1,13 @@
 
 import { setupDatabase } from './rag.js';
 
-const DATA_FILE = 'bdlaws.parquet';
+const DEFAULT_DATA_FILE = 'bdlaws.parquet';
 
 async function run() {
-    console.log('Setting up the database...');
-    await setupDatabase(DATA_FILE);
+    const argPath = process.argv[2];
+    const dataFile = argPath || DEFAULT_DATA_FILE;
+    console.log(`Setting up the database from: ${dataFile}`);
+    await setupDatabase(dataFile);
     console.log('Database setup is complete.');
 }
 

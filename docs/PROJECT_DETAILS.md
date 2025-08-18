@@ -15,22 +15,24 @@ The goal of this project is to create a reliable and accurate question-answering
 
 The system is composed of two main parts:
 
-1.  **Data Pipeline (Python):** A Python-based crawler that fetches the constitution text from the web, processes it, and stores it in a structured format.
-2.  **RAG Pipeline (Node.js):** A Node.js application that uses the processed data to answer user questions.
+1.  **Data Pipeline (Python or API):**
+    - Python-based crawler (`crawl_bdlaws.py`) that fetches and chunks content from `https://bd-laws.pages.dev/`.
+    - API-based fetchers (`src/fetch-constitution.js`, `src/fetch-sections.js`) that pull sections from `https://bd-laws-api.bdit.community/api` and emit JSONL.
+2.  **RAG Pipeline (Node.js):**
+    - Generates embeddings locally, stores vectors in Chroma, retrieves the most relevant chunks, and prepares a strict, citation-oriented prompt.
 
 ## 2. Data Pipeline
 
-The data pipeline is responsible for acquiring and processing the constitution text. It consists of a single Python script: `crawl_bdlaws.py`.
+The data pipeline is responsible for acquiring and processing the constitution text. You can use either the Python crawler or the API fetchers.
 
-### `crawl_bdlaws.py`
+### Python Crawler: `crawl_bdlaws.py`
 
-- **Purpose:** To crawl the `https://bd-laws.pages.dev/` website and extract the full text of the Bangladesh Constitution.
+- **Purpose:** Crawl `https://bd-laws.pages.dev/` and extract the full text.
 - **Technology:** Python, Playwright, BeautifulSoup, pandas.
 - **Process:**
-    1.  The script starts at the `START_URL` and recursively crawls all same-site links.
-    2.  For each page, it extracts the main text content and its headings.
-    3.  The extracted data is saved to `bdlaws.jsonl`.
-    4.  The text is then chunked into smaller pieces and saved to `bdlaws.parquet`, which is the final output used by the RAG pipeline.
+    1. Recursively crawl and extract main content.
+    2. Clean and chunk text (≈800 tokens with overlap).
+    3. Emit `bdlaws.jsonl` and `bdlaws.parquet`.
 - **Schema (`bdlaws.parquet`):**
     - `doc_url` (string): The source URL of the document.
     - `doc_title` (string): The title of the document.
@@ -39,34 +41,44 @@ The data pipeline is responsible for acquiring and processing the constitution t
     - `chunk_index` (integer): The index of the chunk within the document.
     - `text` (string): The text chunk.
 
+### API Fetchers: `src/fetch-constitution.js`, `src/fetch-sections.js`
+
+- **Purpose:** Pull sections for the Constitution (or any act) directly from the API and emit JSONL compatible with the RAG pipeline.
+- **Schema (JSONL records):**
+    - `url` (string): API URL for the section with an anchor.
+    - `title` (string): Human-readable title, e.g., `Act <id> - <section name>`.
+    - `headings` (array of strings): Section name.
+    - `text` (string): Section description/content.
+- **Ingestion:** JSONL is chunked on-the-fly inside `src/rag.js` to the same effective chunking as Parquet.
+
 ## 3. RAG Pipeline
 
-The RAG pipeline is the core of the Q&A system. It uses the data from the `bdlaws.parquet` file to answer questions.
+The RAG pipeline is the core of the Q&A system. It uses the data from `bdlaws.parquet` or JSONL files to answer questions.
 
 ### Key Components
 
 - **`src/rag.js`:** The main file containing the RAG logic.
-    - **Embedding Model:** Uses the `Xenova/bge-small-en-v1.5` model from `@xenova/transformers` to generate vector embeddings for the text chunks.
-    - **Vector Database:** Uses `ChromaDB` to store the vector embeddings and perform similarity searches.
-    - **LLM:** Uses a local text generation model (`Xenova/distilgpt2`) to generate the final answer.
-- **`src/setup-db.js`:** A script to read the `bdlaws.parquet` file, generate embeddings, and populate the ChromaDB database.
-- **`src/query.js`:** A command-line interface to ask questions to the system.
+    - **Embedding Model:** `Xenova/bge-small-en-v1.5` via `@xenova/transformers`.
+    - **Vector Database:** Chroma over HTTP (requires running a local server) with the collection name `constitution`.
+    - **LLM:** Local text generation model (`Xenova/distilgpt2`) to produce the final answer.
+    - **Strictness:** The prompt instructs the model to answer only from provided context; if not covered, it must say so.
+- **`src/setup-db.js`:** CLI to read Parquet or JSONL, embed, and populate Chroma.
+- **`src/query.js`:** CLI to retrieve, build the prompt, and generate an answer.
+- **`src/fetch-constitution.js` / `src/fetch-sections.js`:** Data acquisition via API.
 
 ### How it Works
 
-1.  When the user asks a question, the `query.js` script generates an embedding for the query.
-2.  It then queries the ChromaDB database to find the most similar text chunks from the constitution.
-3.  The retrieved text chunks are then used to construct a detailed prompt for the LLM.
-4.  The LLM generates an answer based *only* on the provided context from the constitution.
+1. Start a Chroma HTTP server (Docker or Python CLI) on `http://localhost:8000`.
+2. Acquire data (crawler or API) → produce `bdlaws.parquet` or JSONL.
+3. `setup-db.js` reads records, chunks (if JSONL), embeds with `@xenova/transformers`, and upserts into Chroma.
+4. `query.js` embeds the user query, retrieves nearest chunks, constructs a strict prompt with inline sources, and generates an answer.
 
 ## 4. How to Use
 
-1.  **Acquire the Data:**
-    - Install Python dependencies: `pip install playwright beautifulsoup4 pandas tqdm lxml`
-    - Install Playwright browsers: `playwright install`
-    - Run the crawler: `python crawl_bdlaws.py`
-
-2.  **Run the RAG Pipeline:**
-    - Install Node.js dependencies: `npm install`
-    - Set up the database: `node src/setup-db.js`
-    - Ask a question: `node src/query.js "Your question here"`
+1. Acquire the data (crawler or API).
+2. `npm install`.
+3. Start Chroma server:
+   - Docker: `docker run -p 8000:8000 chromadb/chroma`
+   - Python: `chroma run --path ./chroma_db`
+4. Build DB: `node src/setup-db.js <your .parquet | .jsonl>`
+5. Query: `node src/query.js "Your question here"`

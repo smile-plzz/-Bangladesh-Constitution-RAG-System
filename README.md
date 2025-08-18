@@ -13,33 +13,39 @@ This project aims to build a question-answering system for the Constitution of B
   - `rag.js`: The core RAG logic, including embedding generation and querying.
   - `setup-db.js`: A script to set up the vector database.
   - `query.js`: A script to query the RAG system.
+  - `fetch-sections.js`: Fetch sections for a given act (e.g., `/sections/383`) and write JSONL.
+  - `fetch-constitution.js`: Discover the Constitution act via API and write all its sections as JSONL.
 - `data/`: Directory for storing data.
 
 ## Data Acquisition
 
-The data is acquired by running the Python crawler. This script will crawl the `https://bd-laws.pages.dev/` website, extract the text, and create two files: `bdlaws.jsonl` and `bdlaws.parquet`.
+You can acquire data via either the Python crawler or the API.
 
-**1. Install Python Dependencies:**
-
-```
-pip install playwright beautifulsoup4 pandas tqdm lxml
-```
-
-**2. Install Playwright browsers:**
+**Option A: Python Crawler (`https://bd-laws.pages.dev/`)**
 
 ```
+pip install playwright beautifulsoup4 pandas tqdm lxml aiohttp
 playwright install
-```
-
-**3. Run the Crawler:**
-
-```
 python crawl_bdlaws.py
 ```
 
+This produces `bdlaws.jsonl` and `bdlaws.parquet`.
+
+**Option B: API (`https://bd-laws-api.bdit.community/api`)**
+
+- Fetch Constitution automatically:
+```
+node src/fetch-constitution.js
+```
+- Or fetch a specific act’s sections (e.g., 383):
+```
+node src/fetch-sections.js https://bd-laws-api.bdit.community/api/sections/383
+```
+This produces a JSONL file like `bdlaws_constitution_<ACT_ID>.jsonl` or `bdlaws_sections_383.jsonl`.
+
 ## RAG Pipeline
 
-Once the data has been acquired, you can use the Node.js-based RAG pipeline to ask questions.
+Once the data has been acquired, use the Node.js-based RAG pipeline to ask questions. The vector store uses a Chroma HTTP server.
 
 **1. Install Node.js Dependencies:**
 
@@ -47,15 +53,33 @@ Once the data has been acquired, you can use the Node.js-based RAG pipeline to a
 npm install
 ```
 
-**2. Set up the Database:**
+**2. Start Chroma Server (required):**
 
-This will create a vector database from the `bdlaws.parquet` file.
-
+- Docker:
 ```
-node src/setup-db.js
+docker run -p 8000:8000 chromadb/chroma
+```
+- Or Python:
+```
+pip install chromadb
+chroma run --path ./chroma_db
+# or: python -m chromadb run --path ./chroma_db
 ```
 
-**3. Query the System:**
+**3. Set up the Database:**
+
+- From Parquet:
+```
+node src/setup-db.js bdlaws.parquet
+```
+- From JSONL (API output or crawler output):
+```
+node src/setup-db.js bdlaws_constitution_<ACT_ID>.jsonl
+# or
+node src/setup-db.js bdlaws_sections_383.jsonl
+```
+
+**4. Query the System:**
 
 ```
 node src/query.js "Your question about the constitution"

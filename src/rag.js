@@ -1,6 +1,7 @@
 import { pipeline } from '@xenova/transformers';
 import { ChromaClient } from 'chromadb';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const DB_PATH = 'chroma_db';
 const COLLECTION_NAME = 'constitution';
@@ -9,31 +10,83 @@ const COLLECTION_NAME = 'constitution';
 const extractor = await pipeline('feature-extraction', 'Xenova/bge-small-en-v1.5');
 
 // 2. Initialize ChromaDB client
-const client = new ChromaClient({ path: DB_PATH });
+// Use HTTP server (start with: `chroma run --path ./chroma_db`)
+const client = new ChromaClient({ host: 'localhost', port: 8000, ssl: false });
 
 // 3. Function to create and store embeddings
 
-import { ParquetReader } from 'parquetjs-lite';
+import parquet from 'parquetjs-lite';
+const { ParquetReader } = parquet;
 
 // ... (rest of the file is the same until setupDatabase)
 
 // 3. Function to create and store embeddings
 async function setupDatabase(filePath) {
     try {
-        // Get or create the collection
-        const collection = await client.getOrCreateCollection({ name: COLLECTION_NAME });
+        // Get or create the collection (disable default embedding function)
+        const collection = await client.getOrCreateCollection({ name: COLLECTION_NAME, embeddingFunction: null });
 
-        // Create a ParquetReader for the file
-        const reader = await ParquetReader.openFile(filePath);
+        // Prepare a unified list of records regardless of source (Parquet or JSONL)
+        let records = [];
 
-        // Read the entire file
-        const cursor = reader.getCursor();
-        const records = [];
-        let record = null;
-        while (record = await cursor.next()) {
-            records.push(record);
+        if (filePath.toLowerCase().endsWith('.parquet')) {
+            // Create a ParquetReader for the file
+            const reader = await ParquetReader.openFile(filePath);
+
+            // Read the entire file
+            const cursor = reader.getCursor();
+            let record = null;
+            while (record = await cursor.next()) {
+                records.push(record);
+            }
+            await reader.close();
+        } else if (filePath.toLowerCase().endsWith('.jsonl') || filePath.toLowerCase().endsWith('.json')) {
+            // Load JSONL or JSON file and chunk to the same schema
+            const raw = fs.readFileSync(filePath, 'utf-8');
+            const lines = filePath.toLowerCase().endsWith('.jsonl') ? raw.split(/\r?\n/).filter(Boolean) : [raw];
+            const docs = filePath.toLowerCase().endsWith('.jsonl')
+                ? lines.map(line => JSON.parse(line))
+                : JSON.parse(raw); // expect array or object with url/title/text
+
+            const inputDocs = Array.isArray(docs) ? docs : [docs];
+
+            // Chunking parameters similar to crawler
+            const CHUNK_TOKENS = 800;
+            const OVERLAP_TOKENS = 120;
+            const step = Math.max(1, CHUNK_TOKENS - OVERLAP_TOKENS);
+
+            for (const d of inputDocs) {
+                const url = d.url || d.doc_url || '';
+                const title = d.title || d.doc_title || '';
+                const headingsArray = Array.isArray(d.headings) ? d.headings : (typeof d.headings === 'string' ? [d.headings] : []);
+                const headingsJoined = headingsArray.join(' | ');
+                const text = d.text || d.raw_text || '';
+                if (!text) continue;
+
+                const words = text.split(/\s+/);
+                for (let i = 0; i < words.length; i += step) {
+                    const chunkWords = words.slice(i, i + CHUNK_TOKENS);
+                    const chunk = chunkWords.join(' ').trim();
+                    if (!chunk) continue;
+                    const chunk_id = crypto.createHash('md5').update(String(url) + String(i)).digest('hex').slice(0, 16);
+                    records.push({
+                        doc_url: url,
+                        doc_title: title,
+                        headings: headingsJoined,
+                        chunk_id,
+                        chunk_index: Math.floor(i / step),
+                        text: chunk,
+                    });
+                }
+            }
+        } else {
+            throw new Error(`Unsupported file type for setupDatabase: ${filePath}`);
         }
-        await reader.close();
+
+        if (!records.length) {
+            console.warn('No records found to index.');
+            return;
+        }
 
         // Prepare documents and metadata
         const documents = records.map(record => record.text);

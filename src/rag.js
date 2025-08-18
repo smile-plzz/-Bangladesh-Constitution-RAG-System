@@ -165,6 +165,56 @@ function prepareLLMPrompt(query, retrievedDocs) {
     return prompt;
 }
 
+// 5b. Deterministic extractive answer from retrieved context with citations
+function answerFromContext(query, retrievedDocs, maxSentences = 5) {
+    if (!retrievedDocs || !retrievedDocs.documents || !retrievedDocs.documents[0]) {
+        return 'No context retrieved.';
+    }
+    const docs = retrievedDocs.documents[0];
+    const metas = retrievedDocs.metadatas[0];
+
+    const keywords = Array.from(new Set(String(query).toLowerCase().split(/[^a-zA-Z]+/).filter(w => w.length >= 4)));
+
+    const seen = new Set();
+    const sentences = [];
+
+    const splitIntoSentences = (text) => {
+        return String(text)
+            .replace(/\s+/g, ' ')
+            .split(/(?<=[\.\?!])\s+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+    };
+
+    // Prefer sentences that include any keyword; keep order by retrieval rank then sentence order
+    docs.forEach((doc, i) => {
+        const meta = metas[i];
+        const sents = splitIntoSentences(doc);
+        for (const s of sents) {
+            const lower = s.toLowerCase();
+            const matches = keywords.length === 0 ? true : keywords.some(k => lower.includes(k));
+            if (!matches) continue;
+            const key = `${i}:${s}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            sentences.push({ text: s, meta });
+        }
+    });
+
+    // Fallback: if nothing matched, take first sentence of top docs
+    if (sentences.length === 0) {
+        docs.forEach((doc, i) => {
+            const meta = metas[i];
+            const first = splitIntoSentences(doc)[0];
+            if (first) sentences.push({ text: first, meta });
+        });
+    }
+
+    const picked = sentences.slice(0, maxSentences);
+    const bullets = picked.map(({ text, meta }) => `- ${text} (Source: ${meta.doc_title} - ${meta.doc_url})`);
+    return bullets.join('\n');
+}
+
 
 // 6. Function to generate an answer using a local LLM
 async function generateAnswer(prompt) {
@@ -183,4 +233,4 @@ async function generateAnswer(prompt) {
     }
 }
 
-export { setupDatabase, queryDatabase, prepareLLMPrompt, generateAnswer };
+export { setupDatabase, queryDatabase, prepareLLMPrompt, generateAnswer, answerFromContext };

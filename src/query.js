@@ -1,5 +1,5 @@
 
-import { queryDatabase, prepareLLMPrompt, generateAnswer } from './rag.js';
+import { queryDatabase, prepareLLMPrompt, answerFromContext } from './rag.js';
 
 async function run() {
     const args = process.argv.slice(2);
@@ -22,7 +22,7 @@ async function run() {
         console.log(prompt);
 
         console.log('\n--- Generated Answer ---');
-        const answer = await generateAnswer(prompt);
+        const answer = answerFromContext(query, results, 6);
         console.log(answer);
     }
 }

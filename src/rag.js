@@ -190,6 +190,11 @@ function answerFromContext(query, retrievedDocs, maxSentences = 5) {
     docs.forEach((doc, i) => {
         const meta = metas[i];
         const sents = splitIntoSentences(doc);
+        // Merge leading article number line like "55." with the next sentence
+        if (sents.length >= 2 && /^\d+\.$/.test(sents[0])) {
+            sents[1] = `${sents[0]} ${sents[1]}`;
+            sents.shift();
+        }
         for (const s of sents) {
             const lower = s.toLowerCase();
             const matches = keywords.length === 0 ? true : keywords.some(k => lower.includes(k));
@@ -201,11 +206,16 @@ function answerFromContext(query, retrievedDocs, maxSentences = 5) {
         }
     });
 
-    // Fallback: if nothing matched, take first sentence of top docs
+    // Fallback: if nothing matched, take first sentence of top docs (after merge rule)
     if (sentences.length === 0) {
         docs.forEach((doc, i) => {
             const meta = metas[i];
-            const first = splitIntoSentences(doc)[0];
+            const sents = splitIntoSentences(doc);
+            if (sents.length >= 2 && /^\d+\.$/.test(sents[0])) {
+                sents[1] = `${sents[0]} ${sents[1]}`;
+                sents.shift();
+            }
+            const first = sents[0];
             if (first) sentences.push({ text: first, meta });
         });
     }
@@ -213,6 +223,136 @@ function answerFromContext(query, retrievedDocs, maxSentences = 5) {
     const picked = sentences.slice(0, maxSentences);
     const bullets = picked.map(({ text, meta }) => `- ${text} (Source: ${meta.doc_title} - ${meta.doc_url})`);
     return bullets.join('\n');
+}
+
+// 5c. Structured answer composer (Summary, Key provisions, Sources)
+function composeStructuredAnswer(query, retrievedDocs, options = {}) {
+    const maxProvisions = options.maxProvisions ?? 5;
+    const language = options.language || 'en';
+
+    const L = (key) => {
+        if (language === 'bn') {
+            switch (key) {
+                case 'summary': return 'সারসংক্ষেপ';
+                case 'keyProvisions': return 'প্রধান বিধানসমূহ';
+                case 'sources': return 'সূত্র';
+                case 'article': return 'অনুচ্ছেদ';
+                default: return key;
+            }
+        }
+        switch (key) {
+            case 'summary': return 'Summary';
+            case 'keyProvisions': return 'Key provisions';
+            case 'sources': return 'Sources';
+            case 'article': return 'Article';
+            default: return key;
+        }
+    };
+
+    if (!retrievedDocs || !retrievedDocs.documents || !retrievedDocs.documents[0]) {
+        return language === 'bn' ? 'কোনও প্রাসঙ্গিক প্রসঙ্গ পাওয়া যায়নি।' : 'No context retrieved.';
+    }
+    const docs = retrievedDocs.documents[0];
+    const metas = retrievedDocs.metadatas[0];
+
+    const splitIntoSentences = (text) => String(text)
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[\.\?!])\s+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+
+    const simplify = (s) => s
+        .replace(/\(\d+\)/g, '') // remove clause markers like (1)
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const extractArticle = (line) => {
+        const m = String(line).match(/^\s*(\d+[A-Z]?)\./); // supports 73A.
+        return m ? m[1] : null;
+    };
+
+    // Query expansion for relevance scoring
+    const q = String(query).toLowerCase();
+    const qTerms = new Set(q.split(/[^a-z]+/).filter(Boolean));
+    const bonusTerms = new Set(['power', 'authority', 'executive', 'prime', 'minister', 'cabinet', 'dissolve', 'parliament']);
+
+    const scoreSentence = (s) => {
+        const t = s.toLowerCase();
+        let score = 0;
+        for (const term of qTerms) if (t.includes(term)) score += 2;
+        for (const term of bonusTerms) if (t.includes(term)) score += 1;
+        return score;
+    };
+
+    // Build candidate provisions with merged first sentence
+    const provisions = [];
+    for (let i = 0; i < docs.length; i++) {
+        const text = docs[i];
+        const meta = metas[i];
+        const sents = splitIntoSentences(text);
+        if (sents.length >= 2 && /^\d+\.$/.test(sents[0])) {
+            sents[1] = `${sents[0]} ${sents[1]}`;
+            sents.shift();
+        }
+        if (sents.length === 0) continue;
+        const first = sents[0];
+        const article = extractArticle(first);
+        const clauseMatch = first.match(/\((\d+)\)/);
+        const clause = clauseMatch ? clauseMatch[1] : null;
+        const heading = (meta.headings || '').split(' | ')[0] || '';
+        const summary = simplify(first);
+        const score = scoreSentence(first);
+        provisions.push({ article, clause, heading, summary, meta, score });
+    }
+
+    // Prioritize by score then by original order
+    provisions.sort((a, b) => b.score - a.score);
+
+    // Deduplicate by article+heading to keep best-scored per provision
+    const seen = new Set();
+    const unique = [];
+    for (const p of provisions) {
+        const key = `${p.article || ''}|${p.heading}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(p);
+    }
+
+    // Summary: top 2 scored provisions as single sentences
+    const summaryLines = unique.slice(0, 2).map(p => p.summary);
+
+    const lines = [];
+    if (summaryLines.length) {
+        lines.push(`${L('summary')}:`);
+        summaryLines.forEach(s => lines.push(`- ${s}`));
+        lines.push('');
+    }
+
+    lines.push(`${L('keyProvisions')}:`);
+    unique.slice(0, maxProvisions).forEach(p => {
+        const art = p.article ? `${L('article')} ${p.article}` : `${L('article')}`;
+        const clausePart = p.clause ? `(${p.clause})` : '';
+        const head = p.heading ? ` — ${p.heading}` : '';
+        lines.push(`- ${art}${clausePart}${head}: ${p.summary}`);
+    });
+
+    // Sources
+    const sourcesSeen = new Set();
+    const sources = [];
+    for (const p of unique) {
+        const srcKey = `${p.meta.doc_title}|${p.meta.doc_url}`;
+        if (sourcesSeen.has(srcKey)) continue;
+        sourcesSeen.add(srcKey);
+        sources.push(`- ${p.meta.doc_title} (${p.meta.doc_url})`);
+        if (sources.length >= 10) break;
+    }
+    if (sources.length) {
+        lines.push('');
+        lines.push(`${L('sources')}:`);
+        lines.push(...sources);
+    }
+
+    return lines.join('\n');
 }
 
 
@@ -233,4 +373,4 @@ async function generateAnswer(prompt) {
     }
 }
 
-export { setupDatabase, queryDatabase, prepareLLMPrompt, generateAnswer, answerFromContext };
+export { setupDatabase, queryDatabase, prepareLLMPrompt, generateAnswer, answerFromContext, composeStructuredAnswer };

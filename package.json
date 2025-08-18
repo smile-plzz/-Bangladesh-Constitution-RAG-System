@@ -5,12 +5,16 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
     "fetch:sections": "node src/fetch-sections.js",
     "fetch:constitution": "node src/fetch-constitution.js",
     "build:db:constitution": "node src/fetch-constitution.js && for /f %g in ('dir /b bdlaws_constitution_*.jsonl') do node src/setup-db.js %g",
     "start:chroma": "powershell -ExecutionPolicy Bypass -File scripts/start-chroma.ps1",
     "health": "powershell -ExecutionPolicy Bypass -File scripts/healthcheck.ps1",
     "build:db": "node src/setup-db.js bdlaws_constitution_406.jsonl",
+    "build:db:openai": "node src/setup-db-openai.js bdlaws_constitution_406.jsonl",
     "ask": "node src/query.js \"What is the power of Prime Minister?\"",
     "ask:bn": "node src/query.js --lang=bn \"প্রধানমন্ত্রীর ক্ষমতা কী?\""
   },
@@ -24,6 +28,14 @@
     "cheerio": "^1.1.2",
     "chromadb": "^3.0.12",
     "iconv-lite": "^0.6.3",
-    "parquetjs-lite": "^0.8.7"
+    "next": "14.2.5",
+    "openai": "^4.57.0",
+    "parquetjs-lite": "^0.8.7",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.10",
+    "typescript": "5.9.2"
   }
 }

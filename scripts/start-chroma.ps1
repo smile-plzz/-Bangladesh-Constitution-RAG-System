@@ -1,6 +1,6 @@
 param(
     [string]$Path = "./chroma_db",
-    [string]$Host = "127.0.0.1",
+    [string]$ServerHost = "127.0.0.1",
     [int]$Port = 8000
 )
 
@@ -39,7 +39,7 @@ if (-not $chromaExe) {
 
 if ($chromaExe) {
     Write-Host "Launching Chroma CLI: $chromaExe" -ForegroundColor Green
-    & $chromaExe run --path $Path --host $Host --port $Port
+    & $chromaExe run --path $Path --host $ServerHost --port $Port
     exit $LASTEXITCODE
 }
 

@@ -92,3 +92,21 @@ npm run ask:bn
 ## Project Management
 
 - See `docs/TASK_LIST.md` for plan and tasks.
+
+## Deploying to Vercel
+
+- Prerequisites:
+  - Host a Chroma server (Chroma Cloud or your own VM/Docker) and note its base URL.
+  - Index your corpus against that Chroma using OpenAI embeddings:
+    - `node src/setup-db-openai.js bdlaws_constitution_406.jsonl`
+- Configure Vercel Project Environment Variables:
+  - `CHROMA_URL` = your Chroma base URL (e.g., `https://chroma.example.com:8000`)
+  - `CHROMA_COLLECTION` = `constitution_openai` (or your chosen name)
+  - `OPENAI_API_KEY` = your API key
+  - Optional: `OPENAI_EMBED_MODEL` (default `text-embedding-3-small`)
+- Deploy:
+  - `npm run build` locally to verify
+  - Push to Git; connect repo to Vercel; deploy
+- Use:
+  - Open the site; ask questions; toggle EN/BN as needed
+  - The app calls `POST /api/query` which embeds the question, queries Chroma, and returns a concise structured answer (Summary, Key provisions, Sources)

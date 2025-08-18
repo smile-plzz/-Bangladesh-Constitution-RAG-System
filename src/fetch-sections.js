@@ -49,6 +49,10 @@ async function main() {
 			title: `Act ${actId} - ${name}`,
 			headings: [name],
 			text: description,
+			created_at: s.created_at || null,
+			updated_at: s.updated_at || null,
+			act_id: s.act_id || Number(actId),
+			section_id: sectionId,
 		};
 		out.write(JSON.stringify(rec) + '\n');
 	}
